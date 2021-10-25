@@ -1,0 +1,10 @@
+filebeat.inputs:
+  - type: log
+    paths:
+      - "/var/logs/*.log"
+
+output.elasticsearch:
+  hosts:
+    - "elasticsearch:9200"
+  indices:
+    - index: "goelklog-%{[agent.version]}-%{+yyyy.MM.dd}"

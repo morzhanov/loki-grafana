@@ -1,53 +1,39 @@
 version: "3"
 services:
-  elasticsearch:
-    image: "docker.elastic.co/elasticsearch/elasticsearch:7.15.1"
-    container_name: go_elk_example_elasticsearch
-    environment:
-      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
-      - "discovery.type=single-node"
+  loki:
+    image: grafana/loki:1.4.1
+    container_name: gl_loki
+    expose:
+      - 3100
     ports:
-      - "9200:9200"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml
     networks:
-      - go-elk-example
+      - gl
 
-  kibana:
-    image: "docker.elastic.co/kibana/kibana:7.15.1"
-    container_name: go_elk_example_kibana
+  promtail:
+    image: grafana/promtail:1.4.1
+    container_name: gl_promtail
+    expose:
+      - 9080
     ports:
-      - "5601:5601"
-    networks:
-      - go-elk-example
-
-  filebeat:
-    image: "docker.elastic.co/beats/filebeat:7.15.1"
-    container_name: go_elk_example_filebeat
-    user: root
+      - "9080:9080"
     volumes:
-      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
-      - ../logs:/var/logs
+      - ./docker-config.yml:/etc/promtail/docker-config.yml
+    command: -config.file=/etc/promtail/docker-config.yml
     networks:
-      - go-elk-example
+      - gl
 
-  metricbeat:
-    build: ./metricbeat
-    container_name: go_elk_example_metricbeat
-    environment:
-      ELASTICSEARCH_HOSTS: elasticsearch:9200
-      KIBANA_HOST: kibana:5601
-    volumes:
-      - metricbeat_data:/usr/share/metricbeat/data
+  grafana:
+    image: grafana/grafana:master
+    container_name: gl_grafana
+    ports:
+      - "3000:3000"
     networks:
-      - go-elk-example
-    depends_on:
-      - elasticsearch
-      - kibana
+      - gl
 
 networks:
-  go-elk-example:
+  gl:
 
 volumes:
-  elasticsearch_data:
-  metricbeat_data:
+  promtail:

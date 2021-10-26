@@ -1,107 +1,81 @@
 package rest
 
 import (
-	"bytes"
-	"encoding/json"
-	"io/ioutil"
+	"fmt"
 	"net/http"
-
-	"github.com/morzhanov/go-elk-example/internal/metrics"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/morzhanov/go-elk-example/internal/doc"
-	"github.com/morzhanov/go-elk-example/internal/es"
 	"go.uber.org/zap"
 )
 
 type rest struct {
-	esearch es.ElasticSearch
-	log     *zap.Logger
-	mc      metrics.Collector
-}
-
-type bodyLogWriter struct {
-	gin.ResponseWriter
-	body *bytes.Buffer
+	log *zap.Logger
+	v   string
 }
 
 type REST interface {
 	Listen()
 }
 
-func (r *rest) handleHttpErr(c *gin.Context, err error) {
-	c.String(http.StatusInternalServerError, err.Error())
-	r.log.Error("error in the handler", zap.Error(err))
+func (r *rest) handleVersion(c *gin.Context) {
+	c.String(http.StatusOK, fmt.Sprintf("version: %s", r.v))
 }
 
-func (r *rest) handleFind(c *gin.Context) {
-	fName := c.Param("field")
-	val := c.Param("value")
-	res, err := r.esearch.Find(fName, val)
-	if err != nil {
-		r.handleHttpErr(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, res)
+func (r *rest) handleHello(c *gin.Context) {
+	c.String(http.StatusOK, "Hi!")
 }
 
-func (r *rest) handleUpdate(c *gin.Context) {
-	id := c.Param("id")
-	jsonData, err := ioutil.ReadAll(c.Request.Body)
-	if err != nil {
-		r.handleHttpErr(c, err)
-		return
-	}
-	var d doc.Document
-	if err := json.Unmarshal(jsonData, &d); err != nil {
-		r.handleHttpErr(c, err)
-		return
-	}
-
-	if err := r.esearch.Update(id, &d); err != nil {
-		r.handleHttpErr(c, err)
-		return
-	}
-	c.Status(http.StatusOK)
+func getDurationInMilliseconds(start time.Time) float64 {
+	end := time.Now()
+	duration := end.Sub(start)
+	milliseconds := float64(duration) / float64(time.Millisecond)
+	rounded := float64(int(milliseconds*100+.5)) / 100
+	return rounded
 }
 
-func (r *rest) handleDelete(c *gin.Context) {
-	id := c.Param("id")
-	if err := r.esearch.Delete(id); err != nil {
-		r.handleHttpErr(c, err)
-		return
+func getClientIP(c *gin.Context) string {
+	requester := c.Request.Header.Get("X-Forwarded-For")
+	if len(requester) == 0 {
+		requester = c.Request.Header.Get("X-Real-IP")
 	}
-	c.Status(http.StatusOK)
+	if len(requester) == 0 {
+		requester = c.Request.RemoteAddr
+	}
+	if strings.Contains(requester, ",") {
+		requester = strings.Split(requester, ",")[0]
+	}
+	return requester
 }
 
-func (w bodyLogWriter) Write(b []byte) (int, error) {
-	w.body.Write(b)
-	return w.ResponseWriter.Write(b)
-}
-
-func (r *rest) metricsMiddleware(c *gin.Context) {
-	c.Writer = &bodyLogWriter{body: bytes.NewBufferString(""), ResponseWriter: c.Writer}
-	c.Next()
-	statusCode := c.Writer.Status()
-	r.log.Info("handled REST request", zap.Int("status_code", statusCode))
-	r.mc.IncReq()
-	if statusCode >= 300 {
-		r.mc.IncErrs()
+func (r *rest) jsonLogMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		duration := getDurationInMilliseconds(start)
+		r.log.Info(
+			"request handled",
+			zap.String("client_ip", getClientIP(c)),
+			zap.Float64("duration", duration),
+			zap.String("method", c.Request.Method),
+			zap.String("path", c.Request.RequestURI),
+			zap.Int("status", c.Writer.Status()),
+			zap.String("referrer", c.Request.Referer()),
+		)
 	}
 }
 
 func (r *rest) Listen() {
 	router := gin.Default()
-	router.GET("/debug/vars", r.mc.GetHandler())
-	router.GET("/:field/:value", r.handleFind)
-	router.PUT("/:id", r.handleUpdate)
-	router.DELETE("/:id", r.handleDelete)
-	router.Use(r.metricsMiddleware)
+	router.Use(r.jsonLogMiddleware())
+	router.GET("/version", r.handleVersion)
+	router.GET("/hello", r.handleHello)
 	if err := router.Run(); err != nil {
 		r.log.Fatal("error during rest controller execution", zap.Error(err))
 	}
 }
 
-func NewREST(esearch es.ElasticSearch, l *zap.Logger, mc metrics.Collector) REST {
-	return &rest{esearch, l, mc}
+func NewREST(l *zap.Logger, version string) REST {
+	return &rest{l, version}
 }

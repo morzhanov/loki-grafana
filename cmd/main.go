@@ -6,48 +6,26 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/morzhanov/go-elk-example/internal/rest"
+	"github.com/morzhanov/loki-grafana/internal/config"
 
-	"github.com/morzhanov/go-elk-example/internal/metrics"
-
-	"github.com/morzhanov/go-elk-example/internal/es"
-	"github.com/morzhanov/go-elk-example/internal/generator"
-
-	"github.com/morzhanov/go-elk-example/internal/logger"
-
-	"go.uber.org/zap"
-
-	"github.com/morzhanov/go-elk-example/internal/config"
+	"github.com/morzhanov/loki-grafana/internal/logger"
+	"github.com/morzhanov/loki-grafana/internal/rest"
 )
 
-func failOnError(l *zap.Logger, step string, err error) {
-	if err != nil {
-		l.Fatal("initialization error", zap.Error(err), zap.String("step", step))
-	}
-}
-
 func main() {
-	l, err := logger.NewLogger()
+	c, err := config.NewConfig()
+	if err != nil {
+		log.Fatalf("error duting config initialization %s", err.Error())
+	}
+	l, err := logger.NewLogger(c.LokiClientURL)
 	if err != nil {
 		log.Fatal(fmt.Errorf("initialization error in step %s: %w", "logger", err))
 	}
 	l.Info("logger created")
-	c, err := config.NewConfig()
-	failOnError(l, "config", err)
-	l.Info("config created")
-	m := metrics.NewMetricsCollector()
-	l.Info("metrics collector created")
 
-	esearch, err := es.NewES(c.ESuri, c.ESindex, l)
-	failOnError(l, "elastic search client", err)
-	l.Info("elastic search client created")
-	g := generator.NewGenerator(esearch, l, m)
-	l.Info("generator created")
-	r := rest.NewREST(esearch, l, m)
+	r := rest.NewREST(l, c.Version)
 	l.Info("rest controller created")
 
-	go g.Generate()
-	l.Info("documents generator started...")
 	go r.Listen()
 	l.Info("rest controller accepts a connections on the port :8080")
 

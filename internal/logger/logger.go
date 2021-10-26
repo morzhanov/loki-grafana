@@ -1,47 +1,39 @@
 package logger
 
 import (
-	"fmt"
 	"os"
+	"time"
 
+	"github.com/afiskon/promtail-client/promtail"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-func NewLogger() (*zap.Logger, error) {
-	baseLogsPath := "./logs/"
-	if err := os.MkdirAll(baseLogsPath, 0777); err != nil {
-		return nil, err
+func NewLogger(lokiUrl string) (*zap.Logger, error) {
+	labels := "{source=go_app,job=go_app_logger}"
+	cfg := promtail.ClientConfig{
+		PushURL:            "http://localhost:3100/api/prom/push",
+		Labels:             labels,
+		BatchWait:          5 * time.Second,
+		BatchEntriesNumber: 10000,
+		SendLevel:          promtail.INFO,
+		PrintLevel:         promtail.INFO,
 	}
-
-	// info
-	infoFilePath := fmt.Sprintf("%sinfo.log", baseLogsPath)
-	_, err := os.Create(infoFilePath)
-	if err != nil {
-		return nil, err
-	}
-	infoF, err := os.OpenFile(infoFilePath, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
-	if err != nil {
-		return nil, err
-	}
-
-	// error
-	errFilePath := fmt.Sprintf("%serror.log", baseLogsPath)
-	_, err = os.Create(errFilePath)
-	if err != nil {
-		return nil, err
-	}
-	errF, err := os.OpenFile(errFilePath, os.O_APPEND|os.O_WRONLY, os.ModeAppend)
+	loki, err := promtail.NewClientJson(cfg)
 	if err != nil {
 		return nil, err
 	}
 
-	fileEncoder := zapcore.NewJSONEncoder(zap.NewDevelopmentEncoderConfig())
 	consoleEncoder := zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig())
 	core := zapcore.NewTee(
-		zapcore.NewCore(fileEncoder, zapcore.AddSync(infoF), zap.InfoLevel),
-		zapcore.NewCore(fileEncoder, zapcore.AddSync(errF), zap.ErrorLevel),
 		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zap.InfoLevel),
 	)
-	return zap.New(core), nil
+	log := zap.New(core)
+	log = log.WithOptions(zap.Hooks(func(entry zapcore.Entry) error {
+		tstamp := time.Now().String()
+		loki.Infof(`source = '%s', time = '%s', message = '%s'`, "go app", tstamp, entry.Message)
+		time.Sleep(1 * time.Second)
+		return nil
+	}))
+	return log, nil
 }

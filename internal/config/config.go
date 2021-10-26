@@ -3,8 +3,8 @@ package config
 import "github.com/spf13/viper"
 
 type Config struct {
-	ESuri   string `mapstructure:"ES_URI"`
-	ESindex string `mapstructure:"ES_INDEX"`
+	LokiClientURL string `mapstructure:"LOKI_CLIENT_URL"`
+	Version       string `mapstructure:"VERSION"`
 }
 
 func NewConfig() (config *Config, err error) {
